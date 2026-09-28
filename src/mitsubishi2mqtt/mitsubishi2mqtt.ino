@@ -2366,7 +2366,7 @@ void haConfig()
 
   haClimateConfig["swing_horizontal_mode_command_topic"] = ha_wideVane_set_topic;
   haClimateConfig["swing_horizontal_mode_state_topic"] = ha_state_topic;
-  haClimateConfig["swing_horizontal_mode_value_template"] = F("{{ value_json.wideVane if (value_json is defined and value_json.wideVane is defined and value_json.wideVane|length) else 'SWING' }}"); // Set default value for fix "Could not parse data for HA"
+  haClimateConfig["swing_horizontal_mode_state_template"] = F("{{ value_json.wideVane if (value_json is defined and value_json.wideVane is defined and value_json.wideVane|length) else 'SWING' }}"); // Set default value for fix "Could not parse data for HA"
 
   haClimateConfig["action_topic"] = ha_state_topic;
   haClimateConfig["action_template"] = F("{{ value_json.action if (value_json is defined and value_json.action is defined and value_json.action|length) else 'idle' }}"); // Set default value for fix "Could not parse data for HA"
