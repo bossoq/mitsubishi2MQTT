@@ -2281,7 +2281,7 @@ void haConfig()
 
   // send HA config packet
   // setup HA payload device
-  const size_t capacityClimateConfig = JSON_ARRAY_SIZE(7) + 2 * JSON_ARRAY_SIZE(6) + JSON_ARRAY_SIZE(7) + JSON_OBJECT_SIZE(30) + 2048;
+  const size_t capacityClimateConfig = JSON_ARRAY_SIZE(7) + 2 * JSON_ARRAY_SIZE(6) + 2 * JSON_ARRAY_SIZE(7) + JSON_OBJECT_SIZE(34) + 2304;
   DynamicJsonDocument haClimateConfig(capacityClimateConfig);
 
   haClimateConfig["name"] = nullptr;
@@ -2353,6 +2353,21 @@ void haConfig()
   haClimateConfig["swing_mode_cmd_t"] = ha_vane_set_topic;
   haClimateConfig["swing_mode_stat_t"] = ha_state_topic;
   haClimateConfig["swing_mode_stat_tpl"] = F("{{ value_json.vane if (value_json is defined and value_json.vane is defined and value_json.vane|length) else 'AUTO' }}"); // Set default value for fix "Could not parse data for HA"
+  // Horizontal vane as native climate swing_horizontal_mode (HA core PR #139303).
+  // Full key names used here; HA discovery accepts both full and abbreviated forms.
+  JsonArray haConfigSwing_h_modes = haClimateConfig.createNestedArray("swing_horizontal_modes");
+  haConfigSwing_h_modes.add("<<");
+  haConfigSwing_h_modes.add("<");
+  haConfigSwing_h_modes.add("|");
+  haConfigSwing_h_modes.add(">");
+  haConfigSwing_h_modes.add(">>");
+  haConfigSwing_h_modes.add("<>");
+  haConfigSwing_h_modes.add("SWING");
+
+  haClimateConfig["swing_horizontal_mode_command_topic"] = ha_wideVane_set_topic;
+  haClimateConfig["swing_horizontal_mode_state_topic"] = ha_state_topic;
+  haClimateConfig["swing_horizontal_mode_value_template"] = F("{{ value_json.wideVane if (value_json is defined and value_json.wideVane is defined and value_json.wideVane|length) else 'SWING' }}"); // Set default value for fix "Could not parse data for HA"
+
   haClimateConfig["action_topic"] = ha_state_topic;
   haClimateConfig["action_template"] = F("{{ value_json.action if (value_json is defined and value_json.action is defined and value_json.action|length) else 'idle' }}"); // Set default value for fix "Could not parse data for HA"
 
@@ -2472,7 +2487,7 @@ void haConfig()
   mqtt_client.endPublish();
 
   // Vane horizontal config
-  const size_t capacityVaneHorizontalConfig = JSON_ARRAY_SIZE(7) + JSON_OBJECT_SIZE(7) + JSON_OBJECT_SIZE(8) + 2048;
+  const size_t capacityVaneHorizontalConfig = JSON_ARRAY_SIZE(8) + JSON_OBJECT_SIZE(7) + JSON_OBJECT_SIZE(8) + 2048;
   DynamicJsonDocument haVaneHorizontalConfig(capacityVaneHorizontalConfig);
   haVaneHorizontalConfig["name"] = "Vane Horizontal";
   haVaneHorizontalConfig["unique_id"] = getId() + "_vane_horizontal";
@@ -2486,6 +2501,7 @@ void haConfig()
   haConfigVaneHorizontalOptions.add("|");
   haConfigVaneHorizontalOptions.add(">");
   haConfigVaneHorizontalOptions.add(">>");
+  haConfigVaneHorizontalOptions.add("<>");
   haConfigVaneHorizontalOptions.add("SWING");
   addMQTTDeviceInfo(&haVaneHorizontalConfig);
 
