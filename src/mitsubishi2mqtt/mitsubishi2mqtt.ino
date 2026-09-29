@@ -1790,12 +1790,13 @@ heatpumpSettings change_states(heatpumpSettings settings)
   else
   {
     bool update = false;
+    bool powerCommand = false;
     if (server.hasArg("POWER"))
     {
       settings.power = strdup(server.arg("POWER").c_str());
       Log.ln(TAG, "Power = " + String(settings.power));
       update = true;
-      previousCMDisPower = true;
+      powerCommand = true;
     }
     if (server.hasArg("MODE"))
     {
@@ -1832,6 +1833,7 @@ heatpumpSettings change_states(heatpumpSettings settings)
       playBeep(SET);
       hp.setSettings(settings);
       lastCommandSend = millis();
+      previousCMDisPower = powerCommand;
     }
   }
   return settings;
@@ -1856,7 +1858,7 @@ void hpSettingsChanged()
 
 
   // if ((millis() > (lastUpdate + update_int)) && (millis() > (lastCommandSend + POLL_DELAY_AFTER_SET_MS))) { // only send the temperature every update_int interval and not just sent command to A/C.
-  if ((millis() - lastUpdate > update_int) && (millis()  - lastCommandSend >  ((previousCMDisPower) ? 30000 : POLL_DELAY_AFTER_SET_MS ))) { // only send the temperature every update_int interval and not just sent command to A/C.
+  if ((millis() - lastUpdate > update_int) && (millis()  - lastCommandSend >  ((previousCMDisPower) ? POLL_DELAY_AFTER_POWER_SET_MS : POLL_DELAY_AFTER_SET_MS))) { // only send the temperature every update_int interval and not just sent command to A/C.
 
     readHeatPumpSettings();
 
@@ -1952,7 +1954,7 @@ void hpStatusChanged(heatpumpStatus currentStatus)
 
 
   // if ((millis() > (lastTempSend + update_int)) && (millis() > (lastCommandSend + POLL_DELAY_AFTER_SET_MS))) { // only send the temperature every update_int interval and not just sent command to A/C.
-  if ((millis() - lastUpdate > update_int) && (millis()  - lastCommandSend >  ((previousCMDisPower) ? 30000 : POLL_DELAY_AFTER_SET_MS ))) { // only send the temperature every update_int interval and not just sent command to A/C.
+  if ((millis() - lastUpdate > update_int) && (millis()  - lastCommandSend >  ((previousCMDisPower) ? POLL_DELAY_AFTER_POWER_SET_MS : POLL_DELAY_AFTER_SET_MS))) { // only send the temperature every update_int interval and not just sent command to A/C.
 
     // send room temp, operating info and all information
     heatpumpSettings currentSettings = hp.getSettings();
@@ -2058,6 +2060,11 @@ void hpSendLocalState()
 void mqttCallback(char *topic, byte *payload, unsigned int length)
 {
   bool hvacControl = false;
+  // Whether this command changes the power state, which gets the shorter
+  // post-command quiet window. Defaults to false so any branch added later
+  // falls back to the conservative window rather than silently claiming the
+  // short one.
+  bool powerCommand = false;
   // Copy payload into message buffer
   char message[length + 1];
   for (unsigned int i = 0; i < length; i++)
@@ -2080,7 +2087,7 @@ void mqttCallback(char *topic, byte *payload, unsigned int length)
       hpSendLocalState();
       hp.setPowerSetting("OFF");
       hvacControl = true;
-      previousCMDisPower = true;
+      powerCommand = true;
     }
     else if (modeUpper == "ON")
     {
@@ -2101,7 +2108,7 @@ void mqttCallback(char *topic, byte *payload, unsigned int length)
       }
       hp.setPowerSetting("ON");
       hvacControl = true;
-      previousCMDisPower = true;
+      powerCommand = true;
     }
   }
   else if (strcmp(topic, ha_mode_set_topic.c_str()) == 0)
@@ -2116,6 +2123,7 @@ void mqttCallback(char *topic, byte *payload, unsigned int length)
       hpSendLocalState();
       hp.setPowerSetting("OFF");
       hvacControl = true;
+      powerCommand = true;
     }
     else
     {
@@ -2155,7 +2163,7 @@ void mqttCallback(char *topic, byte *payload, unsigned int length)
       hp.setPowerSetting("ON");
       hp.setModeSetting(modeUpper.c_str());
       hvacControl = true;
-      previousCMDisPower = true;
+      powerCommand = true;
     }
   }
   else if (strcmp(topic, ha_temp_set_topic.c_str()) == 0)
@@ -2275,6 +2283,7 @@ void mqttCallback(char *topic, byte *payload, unsigned int length)
 
   if (hvacControl){
     lastCommandSend = millis();
+    previousCMDisPower = powerCommand;
     hp.setInfoModeIndex(0);
   }
 
