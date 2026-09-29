@@ -2075,6 +2075,9 @@ void mqttCallback(char *topic, byte *payload, unsigned int length)
     if (modeUpper == "OFF")
     {
       playBeep(OFF);
+      rootInfo["mode"] = "off";
+      rootInfo["action"] = "off";
+      hpSendLocalState();
       hp.setPowerSetting("OFF");
       hvacControl = true;
       previousCMDisPower = true;
@@ -2082,6 +2085,20 @@ void mqttCallback(char *topic, byte *payload, unsigned int length)
     else if (modeUpper == "ON")
     {
       playBeep(ON);
+      // hp still reports the pre-command settings here (currentSettings is only
+      // updated once update() writes the packet), so fake the power bit to get
+      // the mode/action HA should show optimistically. Skip it when the unit
+      // has not reported a mode yet (fresh boot, or HVAC link down) - mode is
+      // null until the first settings packet, and an empty mode is rendered as
+      // "off" by the discovery template, which is worse than staying quiet.
+      heatpumpSettings wantedPower = hp.getSettings();
+      wantedPower.power = "ON";
+      if (String(wantedPower.mode).length() > 0)
+      {
+        rootInfo["mode"] = hpGetMode(wantedPower);
+        rootInfo["action"] = hpGetAction(hp.getStatus(), wantedPower);
+        hpSendLocalState();
+      }
       hp.setPowerSetting("ON");
       hvacControl = true;
       previousCMDisPower = true;
@@ -3162,7 +3179,16 @@ void loop()
 
         // Log.ln(TAG,"Sync");
         hp.sync();
-        delay(1000);
+        // Same 1s spacing as before, but pump MQTT during it. PubSubClient
+        // handles one inbound packet per loop() call, so a command burst (HA
+        // sends power + mode for a mode change) would otherwise cost one full
+        // iteration per packet before the optimistic state publish goes out.
+        for (int i = 0; i < 20; i++)
+        {
+          if (mqtt_config)
+            mqtt_client.loop();
+          delay(50);
+        }
         // Log.ln(TAG,"Sync done");
         // currentSettings = ac.getSettings();
         // currentStatus = ac.getStatus();
