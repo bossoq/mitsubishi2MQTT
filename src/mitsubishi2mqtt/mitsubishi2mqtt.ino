@@ -113,6 +113,7 @@ unsigned int hpConnectionRetries;
 unsigned int hpConnectionTotalRetries;
 float energy = 0; // kWh
 bool previousCMDisPower = true;
+int8_t commandedPower = -1; // Power state awaiting confirmation from the A/C: -1 none pending, 0 wanted OFF, 1 wanted ON.
 
 // Local state
 StaticJsonDocument<JSON_OBJECT_SIZE(14)> rootInfo;
@@ -1791,12 +1792,14 @@ heatpumpSettings change_states(heatpumpSettings settings)
   {
     bool update = false;
     bool powerCommand = false;
+    int8_t wantedPowerState = -1;
     if (server.hasArg("POWER"))
     {
       settings.power = strdup(server.arg("POWER").c_str());
       Log.ln(TAG, "Power = " + String(settings.power));
       update = true;
       powerCommand = true;
+      wantedPowerState = (strcasecmp(settings.power, "ON") == 0) ? 1 : 0;
     }
     if (server.hasArg("MODE"))
     {
@@ -1834,6 +1837,7 @@ heatpumpSettings change_states(heatpumpSettings settings)
       hp.setSettings(settings);
       lastCommandSend = millis();
       previousCMDisPower = powerCommand;
+      commandedPower = wantedPowerState;
     }
   }
   return settings;
@@ -1851,6 +1855,39 @@ void readHeatPumpSettings()
   rootInfo["mode"] = hpGetMode(currentSettings);
 }
 
+// True while a status publish must stay suppressed after a command.
+//
+// Two stages. The base window (POLL_DELAY_AFTER_POWER_SET_MS for power commands,
+// POLL_DELAY_AFTER_SET_MS otherwise) covers the period in which currentSettings
+// may still hold pre-command values. After a power command that is not enough on
+// its own: the A/C only reports itself on once it has actually started, which on a
+// unit switched back on shortly after being switched off takes ~22s - well past the
+// 16s base window - so the publish at 16s would echo "off" and flicker the HA entity
+// off and back on. Keep holding until the A/C confirms the power state we asked for,
+// capped by POWER_CONFIRM_TIMEOUT_MS so a genuinely rejected command still surfaces.
+bool statusPublishSuppressed()
+{
+  uint32_t sinceCommand = millis() - lastCommandSend;
+
+  if (sinceCommand <= (previousCMDisPower ? POLL_DELAY_AFTER_POWER_SET_MS : POLL_DELAY_AFTER_SET_MS))
+    return true;
+
+  if (commandedPower >= 0)
+  {
+    const char *acPower = hp.getPowerSetting();
+    if (acPower == NULL)               // no settings packet yet (fresh boot, HVAC link down) - nothing to confirm against
+      commandedPower = -1;
+    else if (sinceCommand >= POWER_CONFIRM_TIMEOUT_MS)  // gave up waiting - publish whatever the A/C reports
+      commandedPower = -1;
+    else if ((strcmp(acPower, "ON") == 0) != (commandedPower == 1))
+      return true;                     // A/C has not confirmed the requested power state yet
+    else
+      commandedPower = -1;             // confirmed
+  }
+
+  return false;
+}
+
 void hpSettingsChanged()
 {
   // Log.ln(TAG, "hpSettingsChanged");
@@ -1858,7 +1895,7 @@ void hpSettingsChanged()
 
 
   // if ((millis() > (lastUpdate + update_int)) && (millis() > (lastCommandSend + POLL_DELAY_AFTER_SET_MS))) { // only send the temperature every update_int interval and not just sent command to A/C.
-  if ((millis() - lastUpdate > update_int) && (millis()  - lastCommandSend >  ((previousCMDisPower) ? POLL_DELAY_AFTER_POWER_SET_MS : POLL_DELAY_AFTER_SET_MS))) { // only send the temperature every update_int interval and not just sent command to A/C.
+  if ((millis() - lastUpdate > update_int) && !statusPublishSuppressed()) { // only send the temperature every update_int interval and not just sent command to A/C.
 
     readHeatPumpSettings();
 
@@ -1954,7 +1991,7 @@ void hpStatusChanged(heatpumpStatus currentStatus)
 
 
   // if ((millis() > (lastTempSend + update_int)) && (millis() > (lastCommandSend + POLL_DELAY_AFTER_SET_MS))) { // only send the temperature every update_int interval and not just sent command to A/C.
-  if ((millis() - lastUpdate > update_int) && (millis()  - lastCommandSend >  ((previousCMDisPower) ? POLL_DELAY_AFTER_POWER_SET_MS : POLL_DELAY_AFTER_SET_MS))) { // only send the temperature every update_int interval and not just sent command to A/C.
+  if ((millis() - lastUpdate > update_int) && !statusPublishSuppressed()) { // only send the temperature every update_int interval and not just sent command to A/C.
 
     // send room temp, operating info and all information
     heatpumpSettings currentSettings = hp.getSettings();
@@ -2065,6 +2102,7 @@ void mqttCallback(char *topic, byte *payload, unsigned int length)
   // falls back to the conservative window rather than silently claiming the
   // short one.
   bool powerCommand = false;
+  int8_t wantedPowerState = -1;
   // Copy payload into message buffer
   char message[length + 1];
   for (unsigned int i = 0; i < length; i++)
@@ -2088,6 +2126,7 @@ void mqttCallback(char *topic, byte *payload, unsigned int length)
       hp.setPowerSetting("OFF");
       hvacControl = true;
       powerCommand = true;
+      wantedPowerState = 0;
     }
     else if (modeUpper == "ON")
     {
@@ -2109,6 +2148,7 @@ void mqttCallback(char *topic, byte *payload, unsigned int length)
       hp.setPowerSetting("ON");
       hvacControl = true;
       powerCommand = true;
+      wantedPowerState = 1;
     }
   }
   else if (strcmp(topic, ha_mode_set_topic.c_str()) == 0)
@@ -2124,6 +2164,7 @@ void mqttCallback(char *topic, byte *payload, unsigned int length)
       hp.setPowerSetting("OFF");
       hvacControl = true;
       powerCommand = true;
+      wantedPowerState = 0;
     }
     else
     {
@@ -2164,6 +2205,7 @@ void mqttCallback(char *topic, byte *payload, unsigned int length)
       hp.setModeSetting(modeUpper.c_str());
       hvacControl = true;
       powerCommand = true;
+      wantedPowerState = 1;
     }
   }
   else if (strcmp(topic, ha_temp_set_topic.c_str()) == 0)
@@ -2284,6 +2326,7 @@ void mqttCallback(char *topic, byte *payload, unsigned int length)
   if (hvacControl){
     lastCommandSend = millis();
     previousCMDisPower = powerCommand;
+    commandedPower = wantedPowerState;
     hp.setInfoModeIndex(0);
   }
 

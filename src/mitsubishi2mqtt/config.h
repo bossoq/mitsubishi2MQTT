@@ -16,7 +16,7 @@
 
 //#define MY_LANGUAGE fr-FR // define your language
 
-const PROGMEM char* m2mqtt_version = "magi's edition (2026.9.3)";
+const PROGMEM char* m2mqtt_version = "magi's edition (2026.9.4)";
 
 //Define global variables for files
 #ifdef ESP32
@@ -125,6 +125,7 @@ bool _debugMode = false;
 const PROGMEM uint32_t SEND_ROOM_TEMP_INTERVAL_MS = 15000; // 15 seconds (anything less than 45 seconds may cause problems, but it's faster.)
 const PROGMEM uint32_t POLL_DELAY_AFTER_SET_MS = 30000; // After a non-power command, hold status publishes this long. Info reads resume ~1s after the write and HeatPump overwrites currentSettings with whatever the A/C reports, so an early echo of pre-command values would publish stale state.
 const PROGMEM uint32_t POLL_DELAY_AFTER_POWER_SET_MS = 16000; // After a power command, HeatPump::canSend() blocks info reads for PACKET_SENT_INTERVAL_MS + 10000 (15s), so currentSettings cannot go stale before then - ground truth is available just after.
+const PROGMEM uint32_t POWER_CONFIRM_TIMEOUT_MS = 45000; // Hard cap on waiting for the A/C to confirm a power command. A unit restarted shortly after being switched off can take ~22s to report itself on, which is past POLL_DELAY_AFTER_POWER_SET_MS - publishing the A/C's stale "off" in between flickers the HA entity off and straight back on. Cost of the cap: a power command the A/C genuinely rejects shows the wrong state for this long instead of 16s.
 const PROGMEM uint32_t MQTT_RETRY_INTERVAL_MS = 1000; // 1 seconds
 const PROGMEM uint32_t HP_RETRY_INTERVAL_MS = 1000; // 1 seconds
 const PROGMEM uint32_t HP_MAX_RETRIES = 10; // Double the interval between retries up to this many times, then keep retrying forever at that maximum interval.
